@@ -117,12 +117,16 @@ async def modelmanager_callback_handler(query: types.CallbackQuery):
     )
 
 
+# Updating the model_callback_handler handler
 @dp.callback_query(lambda query: query.data.startswith("model_"))
 async def model_callback_handler(query: types.CallbackQuery):
     global modelname
-    global modelfamily
     modelname = query.data.split("model_")[1]
     await query.answer(f"Chosen model: {modelname}")
+    # Updating the model for an active user chat
+    async with ACTIVE_CHATS_LOCK:
+        if ACTIVE_CHATS.get(query.from_user.id) is not None:
+            ACTIVE_CHATS[query.from_user.id]["model"] = modelname
 
 
 @dp.callback_query(lambda query: query.data == "info")
@@ -159,6 +163,7 @@ async def handle_message(message: types.Message):
 
 
 ...
+# Updating the ollama_request function to use a model from the context of an active chat
 async def ollama_request(message: types.Message):
     try:
         await bot.send_chat_action(message.chat.id, "typing")
@@ -176,10 +181,12 @@ async def ollama_request(message: types.Message):
         last_sent_text = None
 
         async with ACTIVE_CHATS_LOCK:
-            # Add prompt to active chats object
+            # Getting a model from the context of an active chat, if it is specified there
+            user_model = ACTIVE_CHATS.get(message.from_user.id, {}).get("model", modelname)
+            # Добавляем запрос в активные чаты
             if ACTIVE_CHATS.get(message.from_user.id) is None:
                 ACTIVE_CHATS[message.from_user.id] = {
-                    "model": modelname,
+                    "model": user_model,
                     "messages": [{"role": "user", "content": prompt, "images": ([image_base64] if image_base64 else [])}],
                     "stream": True,
                 }
@@ -191,7 +198,7 @@ async def ollama_request(message: types.Message):
             f"[Request]: Processing '{prompt}' for {message.from_user.first_name} {message.from_user.last_name}"
         )
         payload = ACTIVE_CHATS.get(message.from_user.id)
-        async for response_data in generate(payload, modelname, prompt):
+        async for response_data in generate(payload, user_model, prompt):
             msg = response_data.get("message")
             if msg is None:
                 continue
